@@ -1,10 +1,7 @@
 name: Verify pre-push note
 
 on:
-  pull_request:
   push:
-    branches:
-      - '**'  # optional: reduce scope if you want
 
 jobs:
   verify-note:
