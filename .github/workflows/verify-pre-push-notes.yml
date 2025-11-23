@@ -1,98 +1,56 @@
-name: Verify pre-push notes
+name: Verify pre-push note
 
 on:
+  pull_request:
   push:
+    branches:
+      - '**'  # optional: reduce scope if you want
 
 jobs:
-  verify-notes:
+  verify-note:
     runs-on: ubuntu-latest
-
-    env:
-      # Base and head for the range of commits to check
-      BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-      HEAD: ${{ github.sha }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # need full history and notes
+          fetch-depth: 0  # required for notes and commit introspection
 
       - name: Fetch notes
         run: |
-          echo "== Remote refs/notes on origin =="
-          git ls-remote origin 'refs/notes/*' || echo "No notes refs on origin."
-
-          echo "== Fetching notes into this clone =="
-          git fetch origin 'refs/notes/*:refs/notes/*' --verbose || echo "Fetch returned non-zero (maybe no notes)."
-
-          echo "== Local refs/notes after fetch =="
-          git show-ref | grep 'refs/notes/' || echo "No notes refs found locally yet."
-
-          echo "== Show all notes =="
+          git fetch origin "refs/notes/*:refs/notes/*" || true
           git log --show-notes=refs/notes/pre-push
 
-      - name: Determine commits to check
-        id: commits
+
+      - name: Check pre-push note on tip commit
         run: |
-          # If BASE is all zeros (e.g., first push), just use HEAD
-          if [ "${BASE}" = "0000000000000000000000000000000000000000" ] || [ -z "${BASE}" ]; then
-            COMMITS=$(git rev-list "${HEAD}")
+          # Determine the SHA to check
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            COMMIT_SHA="${{ github.event.pull_request.head.sha }}"
           else
-            COMMITS=$(git rev-list "${BASE}..${HEAD}" || true)
+            COMMIT_SHA="${{ github.sha }}"
           fi
 
-          echo "Commits to check:"
-          echo "${COMMITS}"
+          echo "Checking pre-push note for commit: $COMMIT_SHA"
 
-          # Expose as step output
-          COMMITS="${COMMITS//$'\n'/ }"
-          echo "commits=${COMMITS}" >> "$GITHUB_OUTPUT"
+          note=$(git notes --ref=refs/notes/pre-push show "$COMMIT_SHA" 2>/dev/null || true)
 
-      - name: Check pre-push notes
-        run: |
-          COMMITS="${{ steps.commits.outputs.commits }}"
-
-          if [ -z "$COMMITS" ]; then
-            echo "No new commits to check."
-            exit 0
-          fi
-
-          missing=0
-
-          for c in $COMMITS; do
-            echo "Checking notes for commit $c"
-            note=$(git notes --ref=refs/notes/pre-push show "$c" 2>/dev/null || true)
-
-            if [ -z "$note" ]; then
-              echo "::error title=Missing pre-push note::Commit $c has no pre-push note."
-              missing=1
-              continue
-            fi
-
-            if ! echo "$note" | grep -q "pre-push:ok"; then
-              echo "::error title=Invalid pre-push note::Commit $c has an invalid pre-push note:"
-              echo "$note"
-              missing=1
-              continue
-            fi
-
-            # Optional stricter checks:
-            # Require a particular checks-version
-            if ! echo "$note" | grep -q "checks-version:1"; then
-              echo "::error title=Outdated checks version::Commit $c has note with wrong checks-version:"
-              echo "$note"
-              missing=1
-            fi
-          done
-
-          if [ "$missing" -ne 0 ]; then
-            echo "One or more commits are missing valid pre-push notes."
-            echo "Ensure 'scripts/setup-dev.sh' has been run and pre-push hooks are installed, then push again."
+          if [ -z "$note" ]; then
+            echo "::error title=Missing pre-push note::Commit $COMMIT_SHA has no pre-push note."
+            echo "Make sure hooks are installed and push again."
             exit 1
           fi
 
-          echo "All commits have valid pre-push notes."
+          if ! echo "$note" | grep -q "pre-push:ok"; then
+            echo "::error title=Invalid pre-push note::Commit $COMMIT_SHA has invalid note:"
+            echo "$note"
+            exit 1
+          fi
 
-  # Optional: run heavy checks only if verify-notes failed or if you want redundancy.
-  # You could add another job here that always runs ./scripts/checks.sh in CI.
+          if ! echo "$note" | grep -q "checks-version:1"; then
+            echo "::error title=Outdated checks version::Commit $COMMIT_SHA has wrong checks-version:"
+            echo "$note"
+            exit 1
+          fi
+
+          echo "Pre-push note found and valid."
