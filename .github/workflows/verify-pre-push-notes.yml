@@ -20,8 +20,14 @@ jobs:
 
       - name: Fetch notes
         run: |
-          git fetch origin "refs/notes/*:refs/notes/*" || true
-          git show-ref | grep "refs/notes" || echo "No notes refs found locally yet."
+          echo "== Remote refs/notes on origin =="
+          git ls-remote origin 'refs/notes/*' || echo "No notes refs on origin."
+
+          echo "== Fetching notes into this clone =="
+          git fetch origin 'refs/notes/*:refs/notes/*' --verbose || echo "Fetch returned non-zero (maybe no notes)."
+
+          echo "== Local refs/notes after fetch =="
+          git show-ref | grep 'refs/notes/' || echo "No notes refs found locally yet."
 
       - name: Determine commits to check
         id: commits
