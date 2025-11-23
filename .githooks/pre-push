@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# pre-push hook that:
+# 1. Runs ./scripts/checks.sh once for the push
+# 2. Adds a git note "pre-push:ok" only to the last commit being pushed
+
+remote_name="$1"
+remote_url="$2"
+
+# Run checks once per push
+if [ ! -x "./scripts/checks.sh" ]; then
+  echo "[pre-push] ERROR: ./scripts/checks.sh not found or not executable."
+  echo "[pre-push] Please run scripts/setup-dev.sh or fix your local setup."
+  exit 1
+fi
+
+echo "[pre-push] Running checks via ./scripts/checks.sh ..."
+./scripts/checks.sh
+echo "[pre-push] Checks passed, stamping last commit with git note."
+
+last_commit=""
+
+# stdin lines: <local_ref> <local_sha> <remote_ref> <remote_sha>
+while read -r local_ref local_sha remote_ref remote_sha; do
+  # Skip deletions
+  if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
+    continue
+  fi
+
+  # Remember the last non-zero local_sha we see
+  last_commit="$local_sha"
+done
+
+if [ -z "$last_commit" ]; then
+  echo "[pre-push] No commits to stamp."
+  exit 0
+fi
+
+timestamp="$(date -Iseconds)"
+note_content="pre-push:ok
+checks-version:1
+timestamp:${timestamp}
+runner:local"
+
+echo "[pre-push] Adding note to $last_commit"
+git notes --ref=refs/notes/pre-push add -f -m "$note_content" "$last_commit"
+
+echo "[pre-push] Done stamping last commit. Notes will be pushed via remote config."
+exit 0
