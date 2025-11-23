@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# pre-push hook that:
+# 1. Runs ./scripts/checks.sh once for the push
+# 2. Adds a git note "pre-push:ok" for each commit being pushed
+
+remote_name="$1"
+remote_url="$2"
+
+# Run checks once per push (not once per commit)
+if [ ! -x "./scripts/checks.sh" ]; then
+  echo "[pre-push] ERROR: ./scripts/checks.sh not found or not executable."
+  echo "[pre-push] Please run scripts/setup-dev.sh or fix your local setup."
+  exit 1
+fi
+
+echo "[pre-push] Running checks via ./scripts/checks.sh ..."
+./scripts/checks.sh
+echo "[pre-push] Checks passed, stamping commits with git notes."
+
+# Collect all commits being pushed
+commits_to_stamp=""
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  # Deletion? skip
+  if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
+    continue
+  fi
+
+  # New branch or force-push with no remote base?
+  if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+    range="$local_sha"
+  else
+    range="$remote_sha..$local_sha"
+  fi
+
+  # Add commits in this range to the list
+  if [ -z "$commits_to_stamp" ]; then
+    commits_to_stamp="$(git rev-list "$range")"
+  else
+    commits_to_stamp="$(printf "%s\n%s" "$commits_to_stamp" "$(git rev-list "$range")" | sort -u)"
+  fi
+done
+
+if [ -z "$commits_to_stamp" ]; then
+  echo "[pre-push] No commits to stamp."
+  exit 0
+fi
+
+timestamp="$(date -Iseconds)"
+note_content="pre-push:ok
+checks-version:1
+timestamp:${timestamp}
+runner:local"
+
+for c in $commits_to_stamp; do
+  echo "[pre-push] Adding note to $c"
+  git notes --ref=refs/notes/pre-push add -f -m "$note_content" "$c"
+done
+
+echo "[pre-push] Done stamping commits. Notes will be pushed via remote config."
+exit 0
