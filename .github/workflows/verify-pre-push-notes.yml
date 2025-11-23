@@ -29,6 +29,9 @@ jobs:
           echo "== Local refs/notes after fetch =="
           git show-ref | grep 'refs/notes/' || echo "No notes refs found locally yet."
 
+          echo "== Show all notes =="
+          git log --show-notes=refs/notes/pre-push
+
       - name: Determine commits to check
         id: commits
         run: |
